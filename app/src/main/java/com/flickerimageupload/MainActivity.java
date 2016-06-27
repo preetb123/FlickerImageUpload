@@ -1,17 +1,25 @@
 package com.flickerimageupload;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.ContentUris;
+import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Environment;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
+import android.provider.Settings;
+import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
+import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
-import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
@@ -34,6 +42,10 @@ import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
+    private static final int PERMISSION_REQUEST_READ_EXTERNAL_STORAGE = 100;
+    private static final int REQUEST_PERMISSION_STORAGE_SETTING = 101;
+    private static final int REQUEST_TAKE_IMAGE_FROM_GALLERY = 102;
+
     private TextView imageUploadedPathView;
 
     @Override
@@ -45,6 +57,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void takeImage(View v){
+        if(checkIfStorageAccessPermissionsGranted()) {
+            takeImageFromGallery();
+        }
+    }
+
+    private void takeImageFromGallery() {
         Intent intent = new Intent();
         if (Build.VERSION.SDK_INT >= 19) {
             // For Android versions of KitKat or later, we use a
@@ -58,21 +76,96 @@ public class MainActivity extends AppCompatActivity {
         }
 
         intent.setType("image/*");
-        startActivityForResult(intent, 0);
+        startActivityForResult(intent, REQUEST_TAKE_IMAGE_FROM_GALLERY);
+    }
+
+    /**
+     * Check if external storage read permission have been granted.
+     * @return {@code true} if permissions grated, {@code false} otherwise
+     */
+    private boolean checkIfStorageAccessPermissionsGranted() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M)
+            return true;
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED)
+            return true;
+        // Should we show an explanation?
+        if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.READ_EXTERNAL_STORAGE)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Storage access")
+                    .setMessage("Storage access required to take image from the gallery")
+                    .setCancelable(false)
+                    .setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            requestStoragePermission();
+                        }
+                    }).create().show();
+        } else {
+            // No explanation needed, we can request the permission.
+            requestStoragePermission();
+        }
+        return false;
+    }
+
+    private void requestStoragePermission() {
+        ActivityCompat.requestPermissions(this,
+                new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+                PERMISSION_REQUEST_READ_EXTERNAL_STORAGE);
+    }
+
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        switch (requestCode){
+            case PERMISSION_REQUEST_READ_EXTERNAL_STORAGE:
+                // If request is cancelled, the result arrays are empty.
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    // permission was granted,
+                    takeImageFromGallery();
+                } else {
+                    // permission denied!
+                    // next time use opens the app show him the empty screen with message to enable the location settings
+                    new AlertDialog.Builder(this)
+                            .setMessage("Please enable storage access.")
+                            .setPositiveButton("Go to settings", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                                    Uri uri = Uri.fromParts("package", getPackageName(), null);
+                                    intent.setData(uri);
+                                    startActivityForResult(intent, REQUEST_PERMISSION_STORAGE_SETTING);
+                                }
+                            })
+                            .setNegativeButton("Exit", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    finish();
+                                }
+                            }).create().show();
+                }
+                break;
+        }
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (resultCode == Activity.RESULT_OK) {
-            Uri uri = data.getData();
-            try {
-                String path = getPath(uri);
-                beginUpload(path);
-            } catch (URISyntaxException e) {
-                Toast.makeText(this,
-                        "Unable to get the file from the given URI.  See error log for details",
-                        Toast.LENGTH_LONG).show();
-                Log.e(TAG, "Unable to upload file from the given uri", e);
+            if(requestCode == REQUEST_TAKE_IMAGE_FROM_GALLERY) {
+                Uri uri = data.getData();
+                try {
+                    String path = getPath(uri);
+                    beginUpload(path);
+                } catch (URISyntaxException e) {
+                    Toast.makeText(this,
+                            "Unable to get the file from the given URI.  See error log for details",
+                            Toast.LENGTH_LONG).show();
+                    Log.e(TAG, "Unable to upload file from the given uri", e);
+                }
+            }else if(requestCode == REQUEST_PERMISSION_STORAGE_SETTING){
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+                        PERMISSION_REQUEST_READ_EXTERNAL_STORAGE);
             }
         }
     }
